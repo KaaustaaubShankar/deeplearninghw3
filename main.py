@@ -44,9 +44,13 @@ class RetinaDataset(Dataset):
             image = augmented['image'].astype(np.float32) / 255.0
             mask = augmented['mask'].astype(np.float32) / 255.0
         
-        # Convert to tensors
-        image_tensor = torch.from_numpy(image).float().unsqueeze(0)  # [1, H, W]
-        mask_tensor = torch.from_numpy(mask).float().unsqueeze(0)    # [1, H, W]
+        # Convert to tensors - images are RGB (3 channels), masks are single channel
+        if len(image.shape) == 2:  # If grayscale, convert to RGB
+            image = np.stack([image, image, image], axis=-1)
+        
+        # Convert HWC to CHW format for PyTorch
+        image_tensor = torch.from_numpy(image).float().permute(2, 0, 1)  # [3, H, W]
+        mask_tensor = torch.from_numpy(mask).float().unsqueeze(0)        # [1, H, W]
         
         return image_tensor, mask_tensor
 
@@ -65,7 +69,7 @@ class ConvBlock(nn.Module):
         return x
 
 class MemoryEfficientUNet(nn.Module):
-    def __init__(self, in_channels=1, out_channels=1, num_blocks=3, base_filters=32):
+    def __init__(self, in_channels=3, out_channels=1, num_blocks=3, base_filters=32):  # Changed to 3 input channels for RGB
         super(MemoryEfficientUNet, self).__init__()
         self.num_blocks = num_blocks
         self.base_filters = base_filters
@@ -74,7 +78,7 @@ class MemoryEfficientUNet(nn.Module):
         self.encoder_blocks = nn.ModuleList()
         self.pool = nn.MaxPool2d(2)
         
-        # First encoder block
+        # First encoder block - now accepts 3 channels (RGB)
         self.encoder_blocks.append(ConvBlock(in_channels, base_filters))
         
         # Remaining encoder blocks
@@ -179,11 +183,11 @@ class RetinaSegmentationTorch:
     def load_and_preprocess_data(self):
         """Load and preprocess the dataset"""
         print("Loading training data...")
-        train_images = self.load_images(self.train_image_path)
+        train_images = self.load_images(self.train_image_path, is_mask=False)
         train_masks = self.load_images(self.train_mask_path, is_mask=True)
         
         print("Loading test data...")
-        test_images = self.load_images(self.test_image_path)
+        test_images = self.load_images(self.test_image_path, is_mask=False)
         test_masks = self.load_images(self.test_mask_path, is_mask=True)
         
         # Normalize images
@@ -206,7 +210,7 @@ class RetinaSegmentationTorch:
         if not os.path.exists(path):
             raise FileNotFoundError(f"Directory not found: {path}")
             
-        image_files = sorted([f for f in os.listdir(path) if f.endswith(('.png', '.jpg', '.tif'))])
+        image_files = sorted([f for f in os.listdir(path) if f.endswith(('.png', '.jpg', '.tif', '.jpeg'))])
         if not image_files:
             raise FileNotFoundError(f"No images found in: {path}")
             
@@ -215,17 +219,26 @@ class RetinaSegmentationTorch:
         for img_file in tqdm(image_files, desc=f"Loading {os.path.basename(path)}"):
             img_path = os.path.join(path, img_file)
             if is_mask:
+                # Load masks as grayscale
                 img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
             else:
-                img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
-                if img is None:
-                    img = cv2.imread(img_path, cv2.IMREAD_COLOR)
-                    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                # Load images as RGB
+                img = cv2.imread(img_path, cv2.IMREAD_COLOR)
+                if img is not None:
+                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # Convert BGR to RGB
+                else:
+                    # If color image fails, try grayscale and convert to RGB
+                    img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+                    if img is not None:
+                        img = np.stack([img, img, img], axis=-1)  # Convert to 3-channel
             
             if img is not None:
                 # Resize to 512x512 if needed
-                if img.shape != (512, 512):
-                    img = cv2.resize(img, (512, 512))
+                if img.shape[:2] != (512, 512):
+                    if len(img.shape) == 3:  # Color image
+                        img = cv2.resize(img, (512, 512))
+                    else:  # Grayscale image
+                        img = cv2.resize(img, (512, 512))
                 images.append(img)
             else:
                 print(f"Warning: Could not load image {img_path}")
@@ -251,14 +264,14 @@ class SimpleAugmentation:
         # Random rotation
         if np.random.random() > 0.5:
             angle = np.random.uniform(-15, 15)
-            h, w = image.shape
+            h, w = image.shape[:2]
             center = (w // 2, h // 2)
             rotation_matrix = cv2.getRotationMatrix2D(center, angle, 1.0)
             image = cv2.warpAffine(image, rotation_matrix, (w, h))
             mask = cv2.warpAffine(mask, rotation_matrix, (w, h))
         
-        # Random brightness
-        if np.random.random() > 0.5:
+        # Random brightness for RGB images
+        if np.random.random() > 0.5 and len(image.shape) == 3:
             brightness = np.random.uniform(0.9, 1.1)
             image = np.clip(image * brightness, 0, 255)
         
@@ -470,9 +483,10 @@ def visualize_test_predictions(test_images, test_masks, predictions, model_name,
     
     # Handle different input types
     if isinstance(test_images, torch.Tensor):
-        test_images_np = test_images.squeeze().numpy()
+        # Convert from CHW to HWC for visualization
+        test_images_np = test_images.permute(0, 2, 3, 1).numpy()
     else:
-        test_images_np = test_images.squeeze()
+        test_images_np = test_images
         
     if isinstance(test_masks, torch.Tensor):
         test_masks_np = test_masks.squeeze().numpy()
@@ -488,9 +502,9 @@ def visualize_test_predictions(test_images, test_masks, predictions, model_name,
         predictions_np = None
     
     for i in range(min(num_samples, len(test_images_np))):
-        # Input image
-        axes[i, 0].imshow(test_images_np[i], cmap='gray')
-        axes[i, 0].set_title('Input Image')
+        # Input image (RGB)
+        axes[i, 0].imshow(test_images_np[i].astype(np.float32))
+        axes[i, 0].set_title('Input Image (RGB)')
         axes[i, 0].axis('off')
         
         # Ground truth
@@ -508,7 +522,7 @@ def visualize_test_predictions(test_images, test_masks, predictions, model_name,
         axes[i, 2].axis('off')
         
         # Overlay
-        axes[i, 3].imshow(test_images_np[i], cmap='gray')
+        axes[i, 3].imshow(test_images_np[i].astype(np.float32))
         if predictions_np is not None:
             axes[i, 3].imshow(predictions_np[i], cmap='Reds', alpha=0.3)
             axes[i, 3].set_title('Overlay')
@@ -584,9 +598,20 @@ def main():
         (train_images, train_masks), (val_images, val_masks), (test_images, test_masks) = \
             segmentation.load_and_preprocess_data()
         
-        print(f"Training data: {train_images.shape}")
-        print(f"Validation data: {val_images.shape}")
-        print(f"Test data: {test_images.shape}")
+        print(f"Training data - Images: {train_images.shape}, Masks: {train_masks.shape}")
+        print(f"Validation data - Images: {val_images.shape}, Masks: {val_masks.shape}")
+        print(f"Test data - Images: {test_images.shape}, Masks: {test_masks.shape}")
+        
+        # Check if images are RGB
+        if len(train_images.shape) == 4:  # [N, H, W, C]
+            print(f"Image shape: {train_images.shape}, appears to be RGB")
+        else:
+            print(f"Image shape: {train_images.shape}, converting to RGB")
+            # Convert grayscale to RGB if needed
+            if len(train_images.shape) == 3:
+                train_images = np.stack([train_images] * 3, axis=-1)
+                val_images = np.stack([val_images] * 3, axis=-1)
+                test_images = np.stack([test_images] * 3, axis=-1)
         
         # Create datasets with augmentation for training
         augmentation = SimpleAugmentation()
@@ -600,7 +625,7 @@ def main():
         val_loader = DataLoader(val_dataset, batch_size=2, shuffle=False, num_workers=0)
         test_loader = DataLoader(test_dataset, batch_size=2, shuffle=False, num_workers=0)
         
-        # Model configurations
+        # Model configurations - now with 3 input channels for RGB
         configurations = [
             {'name': 'U-Net 2 blocks', 'blocks': 2, 'filters': 16},
             {'name': 'U-Net 3 blocks', 'blocks': 3, 'filters': 16},
@@ -614,8 +639,9 @@ def main():
             print(f"Training {config['name']}")
             print(f"{'='*50}")
             
-            # Create model
+            # Create model with 3 input channels for RGB
             model = MemoryEfficientUNet(
+                in_channels=3,  # RGB input
                 num_blocks=config['blocks'],
                 base_filters=config['filters']
             ).to(device)
@@ -624,9 +650,9 @@ def main():
             total_params = sum(p.numel() for p in model.parameters())
             print(f"Model parameters: {total_params:,}")
             
-            # Test forward pass with dummy data
+            # Test forward pass with dummy data (3 channels)
             try:
-                dummy_input = torch.randn(2, 1, 512, 512).to(device)
+                dummy_input = torch.randn(2, 3, 512, 512).to(device)  # 3 channels for RGB
                 dummy_output = model(dummy_input)
                 print(f"Forward pass successful: input {dummy_input.shape} -> output {dummy_output.shape}")
             except Exception as e:
@@ -711,6 +737,7 @@ def test_model_simple(model_path, test_data_path):
         
         # Recreate model with exact same configuration
         model = MemoryEfficientUNet(
+            in_channels=3,  # RGB input
             num_blocks=config['blocks'],
             base_filters=config['filters']
         )
@@ -719,15 +746,16 @@ def test_model_simple(model_path, test_data_path):
         model.to(device)
         model.eval()
         
-        # Load test data
+        # Load test data as RGB
         segmentation = RetinaSegmentationTorch({'test_image': test_data_path})
-        test_images = segmentation.load_images(test_data_path) / 255.0
+        test_images = segmentation.load_images(test_data_path, is_mask=False) / 255.0
         
         predictions = []
         with torch.no_grad():
             for i in range(0, len(test_images), 2):  # Batch size 2
                 batch_images = test_images[i:i+2]
-                batch_tensor = torch.from_numpy(batch_images).float().unsqueeze(1).to(device)
+                # Convert HWC to CHW for PyTorch
+                batch_tensor = torch.from_numpy(batch_images).float().permute(0, 3, 1, 2).to(device)
                 outputs = model(batch_tensor)
                 predictions.append(outputs.cpu())
         
