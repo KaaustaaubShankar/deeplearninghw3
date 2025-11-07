@@ -1,0 +1,23 @@
+{
+  "U-Net 2 blocks": {
+    "dice_with_norm": 0.7974027156829834,
+    "dice_without_norm": 0.44888805896043776,
+    "iou_with_norm": 0.6635328233242035,
+    "iou_without_norm": 0.2896337300539017,
+    "parameters": 117393
+  },
+  "U-Net 3 blocks": {
+    "dice_with_norm": 0.7975592374801636,
+    "dice_without_norm": 0.401312880218029,
+    "iou_with_norm": 0.6634846121072769,
+    "iou_without_norm": 0.25124779567122457,
+    "parameters": 483153
+  },
+  "U-Net 4 blocks": {
+    "dice_with_norm": 0.8064969152212143,
+    "dice_without_norm": 0.4596449747681618,
+    "iou_with_norm": 0.6758786708116531,
+    "iou_without_norm": 0.29858373999595644,
+    "parameters": 1943761
+  }
+}
