@@ -2,3 +2,5 @@
 __MACOSX
 Data_fixed.zip
 Data.zip
+/venv
+*.pyc

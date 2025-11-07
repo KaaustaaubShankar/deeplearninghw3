@@ -1,0 +1,76 @@
+import os
+import torch
+import matplotlib.pyplot as plt
+import numpy as np
+from main import test_model_simple
+
+def quick_test():
+    """Quick test using the test_model_simple function from main.py"""
+    
+    # Test data path
+    test_data_path = 'Data/test/image'
+    
+    # Model configurations to test
+    model_configs = [
+        {'name': 'U-Net 2 blocks', 'path': 'best_u-net_2_blocks.pth'},
+        {'name': 'U-Net 3 blocks', 'path': 'best_u-net_3_blocks.pth'},
+        {'name': 'U-Net 4 blocks', 'path': 'best_u-net_4_blocks.pth'}
+    ]
+    
+    print("Starting quick test of pretrained models...")
+    print("=" * 50)
+    
+    for config in model_configs:
+        model_name = config['name']
+        model_path = config['path']
+        
+        if not os.path.exists(model_path):
+            print(f"Model not found: {model_path}")
+            continue
+            
+        print(f"\nTesting {model_name}...")
+        
+        # Use the simple test function
+        predictions = test_model_simple(model_path, test_data_path)
+        
+        if predictions is not None:
+            print(f"✓ Successfully generated predictions for {model_name}")
+            print(f"  Prediction shape: {predictions.shape}")
+            
+            # Save a sample prediction visualization
+            save_sample_prediction(predictions, model_name)
+        else:
+            print(f"✗ Failed to generate predictions for {model_name}")
+    
+    print("\n" + "=" * 50)
+    print("Quick test completed!")
+
+def save_sample_prediction(predictions, model_name, num_samples=3):
+    """Save sample prediction visualizations"""
+    os.makedirs('quick_test_results', exist_ok=True)
+    
+    # Convert predictions to numpy
+    pred_np = predictions.squeeze().numpy()
+    
+    # Plot sample predictions
+    fig, axes = plt.subplots(1, num_samples, figsize=(15, 5))
+    
+    if num_samples == 1:
+        axes = [axes]
+    
+    for i in range(min(num_samples, len(pred_np))):
+        axes[i].imshow(pred_np[i], cmap='gray')
+        axes[i].set_title(f'{model_name} - Sample {i+1}')
+        axes[i].axis('off')
+    
+    plt.tight_layout()
+    filename = f"quick_test_results/{model_name.replace(' ', '_').lower()}_samples.png"
+    plt.savefig(filename, dpi=150, bbox_inches='tight')
+    plt.close()
+    
+    print(f"  Saved sample predictions to: {filename}")
+
+if __name__ == "__main__":
+    # Test all available models
+    quick_test()
+    
