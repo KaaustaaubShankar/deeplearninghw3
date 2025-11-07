@@ -754,9 +754,7 @@ def test_model_simple(model_path, test_data_path):
             'test_image': 'Data/test/image',
             'test_mask': 'Data/test/mask'
         }
-        print("1")
         segmentation = RetinaSegmentationTorch(data_paths = data_paths)
-        print("2")
         test_images = segmentation.load_images(test_data_path, is_mask=False) / 255.0
         
         predictions = []

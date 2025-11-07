@@ -45,23 +45,32 @@ def quick_test():
     print("\n" + "=" * 50)
     print("Quick test completed!")
 
-def save_sample_prediction(predictions, model_name, num_samples=3):
-    """Save sample prediction visualizations"""
+def save_sample_prediction(predictions, model_name, num_samples=20, cols=4):
+    """Save sample prediction visualizations in a grid format"""
     os.makedirs('quick_test_results', exist_ok=True)
     
     # Convert predictions to numpy
     pred_np = predictions.squeeze().numpy()
     
-    # Plot sample predictions
-    fig, axes = plt.subplots(1, num_samples, figsize=(15, 5))
+    # Limit to the requested number of samples
+    num_samples = min(num_samples, len(pred_np))
     
-    if num_samples == 1:
-        axes = [axes]
+    # Calculate grid size
+    rows = (num_samples + cols - 1) // cols  # Ceiling division
     
-    for i in range(min(num_samples, len(pred_np))):
+    # Create figure
+    fig, axes = plt.subplots(rows, cols, figsize=(cols*3, rows*3))
+    axes = np.array(axes).reshape(-1)  # Flatten in case of single row
+    
+    # Plot each sample
+    for i in range(num_samples):
         axes[i].imshow(pred_np[i], cmap='gray')
-        axes[i].set_title(f'{model_name} - Sample {i+1}')
+        axes[i].set_title(f'Sample {i+1}', fontsize=8)
         axes[i].axis('off')
+    
+    # Turn off unused axes
+    for j in range(num_samples, len(axes)):
+        axes[j].axis('off')
     
     plt.tight_layout()
     filename = f"quick_test_results/{model_name.replace(' ', '_').lower()}_samples.png"
